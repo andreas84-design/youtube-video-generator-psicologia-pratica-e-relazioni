@@ -77,113 +77,132 @@ def cleanup_old_videos(s3_client, current_key):
 
 
 # -------------------------------------------------
-# Mapping SCENA → QUERY visiva (canale Investimenti e Finanza Facile)
+# Mapping SCENA → QUERY visiva (canale Psicologia Pratica e Relazioni)
 # -------------------------------------------------
 def pick_visual_query(context: str, keywords_text: str = "") -> str:
     """
-    Query ottimizzate per B‑roll Finanza Personale:
-    grafici, città finanziarie, calcoli, risparmi, famiglia serena, pianificazione.
+    Query ottimizzate per B‑roll Psicologia e Relazioni:
+    persone che riflettono, coppie, meditazione, emozioni, terapia, crescita personale.
     """
     ctx = (context or "").lower()
     kw = (keywords_text or "").lower()
 
-    base = "financial charts data analysis, business growth graphs, investment planning, money savings"
+    base = "person thinking reflection, mental health wellness, psychology therapy, human emotions calm"
 
-    # ETF / Investimenti / Azioni / Obbligazioni
-    if any(w in ctx for w in ["etf", "investiment", "azion", "obbligaz", "portafogli", "diversific"]):
-        return "stock market charts rising, financial graphs business analysis, investment portfolio laptop screen"
+    # Ansia / Stress / Preoccupazione
+    if any(w in ctx for w in ["ansia", "stress", "preoccupaz", "tension", "nervos", "paura", "panic"]):
+        return "anxious person stress worry, mental health anxiety calm, stressed woman thinking alone head in hands"
 
-    # Risparmio / Budget / Soldi
-    if any(w in ctx for w in ["risparmio", "budget", "soldi", "denaro", "euro", "risorse", "finanze"]):
-        return "person saving money piggy bank, budget planning calculator notebook, coins euro bills counting"
+    # Relazioni / Coppia / Amore / Partner
+    if any(w in ctx for w in ["relazion", "coppia", "amore", "partner", "marito", "moglie", "fidanzat"]):
+        return "couple talking serious conversation, relationship therapy communication, partners discussing emotions together"
 
-    # Pensione / Previdenza / Futuro / TFR
-    if any(w in ctx for w in ["pension", "previdenz", "futuro", "tfr", "vecchiaia", "anzian"]):
-        return "elderly couple planning retirement happy, pension savings calculator, senior people relaxed financial freedom"
+    # Narcisismo / Tossico / Manipolazione / Abuso emotivo
+    if any(w in ctx for w in ["narcis", "tossic", "manipolaz", "abuso", "gaslighting", "controllo"]):
+        return "toxic relationship conflict argument, emotional abuse manipulation, person feeling trapped unhappy relationship"
 
-    # Broker / Piattaforma / App / Trading
-    if any(w in ctx for w in ["broker", "piattaforma", "app", "trading", "compravendita", "acquist"]):
-        return "person using financial app smartphone, stock trading platform laptop, online banking mobile interface"
+    # Autostima / Fiducia / Sicurezza / Crescita personale
+    if any(w in ctx for w in ["autostima", "fiducia", "sicurezz", "crescita personal", "valore", "autoefficacia"]):
+        return "confident person self-esteem mirror, personal growth self-love journey, woman smiling empowerment strength"
 
-    # Fiscalità / Tasse / Dichiarazione / Detrazioni
-    if any(w in ctx for w in ["fiscalit", "tasse", "dichiaraz", "detrazion", "fiscal", "tribut"]):
-        return "tax forms documents calculator, person filling tax declaration paper, accountant reviewing financial documents"
+    # Depressione / Tristezza / Solitudine / Malinconia
+    if any(w in ctx for w in ["depress", "tristezz", "solitudin", "malinconi", "abbatt", "disperaz"]):
+        return "sad person depression loneliness, melancholy woman looking window rain, mental health sadness isolation"
 
-    # Conto deposito / Banca / Interessi
-    if any(w in ctx for w in ["conto", "banca", "deposit", "interest", "rendiment", "guadagn"]):
-        return "bank building modern architecture, savings account interest growth chart, person checking bank statement laptop"
+    # Terapia / Psicologo / Supporto / Aiuto professionale
+    if any(w in ctx for w in ["terapi", "psicolog", "supporto", "aiuto", "profession", "seduta", "consulenz"]):
+        return "therapy session psychologist patient, counseling support mental health, therapist listening empathy professional"
 
-    # Carte credito / Cashback / Pagamenti
-    if any(w in ctx for w in ["carta", "cashback", "pagament", "credit", "bancomat", "pos"]):
-        return "credit card payment contactless, cashback rewards shopping, person using card terminal store"
+    # Mindfulness / Meditazione / Calma / Consapevolezza
+    if any(w in ctx for w in ["mindful", "meditaz", "calma", "consapevol", "respiro", "rilassa", "zen"]):
+        return "meditation mindfulness peaceful calm, woman meditating nature serenity, breathing exercise relaxation yoga"
 
-    # Robo-advisor / Automatico / Tecnologia
-    if any(w in ctx for w in ["robo", "automat", "tecnolog", "digital", "AI", "algoritm"]):
-        return "AI technology financial automation, digital investment platform interface, automated trading algorithms visualization"
+    # Emozioni / Sentimenti / Empatia / Intelligenza emotiva
+    if any(w in ctx for w in ["emozion", "sentiment", "empatia", "intelligent emot", "provare", "sentir"]):
+        return "emotional expression feelings face, empathy human connection understanding, person experiencing emotions tears joy"
 
-    # Famiglia / Casa / Vita quotidiana
-    if any(w in ctx for w in ["famigli", "casa", "figli", "coppia", "genitori", "quotidian"]):
-        return "happy family home financial planning, couple reviewing budget documents together, parents saving for children future"
+    # Comunicazione / Dialogo / Ascolto / Espressione
+    if any(w in ctx for w in ["comunicaz", "dialogo", "ascolto", "esprimer", "parlare", "conversaz"]):
+        return "effective communication dialogue listening, couple having deep conversation, active listening empathy connection"
 
-    # Crescita / Rendimento / Performance / Guadagno
-    if any(w in ctx for w in ["crescita", "rendiment", "performance", "guadagn", "profit", "ritorni"]):
-        return "rising financial graph success, business growth chart upward trend, profit increase stock market screen"
+    # Confini / Assertività / Dire di no / Rispetto
+    if any(w in ctx for w in ["confin", "assertiv", "dire di no", "rispetto", "limiti", "boundary"]):
+        return "setting boundaries assertive confident, person saying no respectfully, healthy boundaries self-respect protection"
 
-    # Errori / Rischi / Perdite / Attenzione
-    if any(w in ctx for w in ["error", "rischi", "perdita", "attenzione", "pericol", "evitar"]):
-        return "warning sign financial risk, stock market crash red charts, person worried looking at declining graph"
+    # Dipendenza affettiva / Attaccamento / Bisogno / Codipendenza
+    if any(w in ctx for w in ["dipendenz affett", "attaccament", "bisogno", "codipendenz", "insicur"]):
+        return "emotional dependency attachment insecurity, codependent relationship need validation, person seeking approval anxious attachment"
 
-    # Strategia / Piano / Obiettivi
-    if any(w in ctx for w in ["strategi", "piano", "obiettiv", "meta", "pianific", "progett"]):
-        return "business strategy planning board, financial goals checklist, person writing investment plan notebook"
+    # Famiglia / Genitori / Figli / Educazione emotiva
+    if any(w in ctx for w in ["famigli", "genitori", "figli", "bambin", "educazion emotiv", "parent"]):
+        return "family emotional connection bonding, parent child communication love, healthy family relationships support"
 
-    # Giovani / Millennials / Principianti / Iniziare
-    if any(w in ctx for w in ["giovan", "millennial", "principiant", "iniziar", "cominciar", "primo"]):
-        return "young person learning investment smartphone, millennial planning finances laptop cafe, beginner reading financial book"
+    # Trauma / Guarigione / Superare / Resilienza
+    if any(w in ctx for w in ["trauma", "guarigion", "superar", "resilienz", "ferit", "recupero"]):
+        return "healing trauma recovery resilience, overcoming past pain strength, person finding peace after trauma"
 
-    # Libertà finanziaria / Indipendenza / Passive income
-    if any(w in ctx for w in ["libertà", "indipendenz", "passive", "rendita", "autonomi"]):
-        return "person relaxing financial freedom beach, passive income laptop remote work, independent financially free lifestyle"
+    # Rabbia / Conflitto / Gestione emozioni intense
+    if any(w in ctx for w in ["rabbia", "conflitto", "ira", "furia", "gestion emozion", "controllo"]):
+        return "anger management emotion control, conflict resolution calm approach, person managing anger breathing technique"
 
-    # Inflazione / Economia / Mercato
-    if any(w in ctx for w in ["inflazion", "economi", "mercato", "crisi", "prezzi"]):
-        return "inflation economic charts rising prices, market economy news financial data, cost of living increase graph"
+    # Autenticità / Essere se stessi / Identità / Accettazione
+    if any(w in ctx for w in ["autenticit", "essere se stess", "identit", "accettaz", "vero io"]):
+        return "authentic self true identity acceptance, being yourself confidence freedom, self-acceptance embracing identity"
 
-    # Educazione / Imparare / Conoscenza
-    if any(w in ctx for w in ["educazion", "impara", "conoscenz", "studia", "formazio"]):
-        return "person studying financial education books, learning investment online course, financial literacy training"
+    # Pensieri negativi / Ruminazione / Overthinking
+    if any(w in ctx for w in ["pensier negativ", "ruminaz", "overthink", "pensare troppo", "ossession"]):
+        return "overthinking negative thoughts worry, rumination mental loop anxiety, person trapped in negative thought patterns"
+
+    # Benessere mentale / Salute psicologica / Equilibrio
+    if any(w in ctx for w in ["benessere mental", "salute psicolog", "equilibrio", "wellness", "serenità"]):
+        return "mental health wellness balance, psychological well-being peace, person feeling mentally healthy happy calm"
+
+    # Giovani / Adolescenti / Studenti / Generazione Z
+    if any(w in ctx for w in ["giovan", "adolescent", "student", "generazion", "teen", "università"]):
+        return "young person mental health student, teenager dealing emotions stress, gen z therapy mental wellness"
+
+    # Amicizia / Relazioni sociali / Solitudine sociale
+    if any(w in ctx for w in ["amiciz", "amici", "relazion social", "solitudin social", "isolament"]):
+        return "friendship social connection support, friends talking emotional bond, social isolation loneliness seeking connection"
+
+    # Cambiamento / Transizione / Nuovi inizi / Crescita
+    if any(w in ctx for w in ["cambiament", "transizion", "nuovi inizi", "crescita", "evoluzion"]):
+        return "life change transition new beginning, personal growth transformation journey, embracing change courage evolution"
 
     # Se abbiamo keywords specifiche dallo Sheet
     if kw and kw != "none":
-        return f"{kw}, financial planning, investment charts, business growth, money management"
+        return f"{kw}, psychology mental health, human emotions, therapy wellness, personal growth"
 
-    # Fallback Finanza generico
+    # Fallback Psicologia generico
     return base
 
 
 def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: float):
     """
-    🎯 Canale Finanza: B‑roll professionale, pulito, positivo.
-    Priorità: grafici, persone che pianificano, città business, calcoli.
-    Filtro anti‑content inappropriato (animali, sport, cucina, fitness, party).
+    🎯 Canale Psicologia: B‑roll emotivo, persone reali, momenti riflessivi.
+    Priorità: volti umani, emozioni, coppie, meditazione, terapia.
+    Filtro anti‑content inappropriato (animali, sport, cucina, party, tech).
     """
     target_duration = min(4.0, avg_scene_duration)
 
-    def is_finance_video_metadata(video_data, source):
+    def is_psychology_video_metadata(video_data, source):
         banned = [
             "dog", "cat", "animal", "wildlife", "bird", "fish", "horse",
-            "fitness", "yoga", "workout", "gym", "exercise",
+            "fitness", "gym", "workout", "bodybuilding",
             "kitchen", "cooking", "food", "recipe", "chef",
-            "wedding", "party", "celebration", "festival",
+            "wedding", "party", "celebration", "festival", "concert",
             "sports", "game", "soccer", "football", "basketball",
-            "gaming", "videogame", "esports"
+            "gaming", "videogame", "esports",
+            "technology", "gadget", "smartphone", "computer", "coding"
         ]
         
-        # Keywords finanza che vogliamo
-        finance_keywords = [
-            "business", "finance", "money", "investment", "stock", "chart",
-            "graph", "data", "analysis", "banking", "savings", "planning",
-            "budget", "calculator", "laptop", "office", "city", "growth"
+        # Keywords psicologia che vogliamo
+        psychology_keywords = [
+            "person", "people", "woman", "man", "face", "emotion", "thinking",
+            "therapy", "mental", "health", "psychology", "meditation", "calm",
+            "relationship", "couple", "talking", "communication", "feeling",
+            "stress", "anxiety", "depression", "sad", "happy", "love",
+            "mindfulness", "reflection", "portrait", "human", "expression"
         ]
         
         if source == "pexels":
@@ -193,12 +212,12 @@ def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: floa
             text = " ".join(video_data.get("tags", [])).lower()
 
         has_banned = any(kw in text for kw in banned)
-        has_finance = any(kw in text for kw in finance_keywords)
+        has_psychology = any(kw in text for kw in psychology_keywords)
         
-        status = "✅ FINANCE OK" if (not has_banned and has_finance) else ("❌ OFF‑TOPIC" if has_banned else "⚠️ NEUTRAL")
+        status = "✅ PSYCHOLOGY OK" if (not has_banned and has_psychology) else ("❌ OFF‑TOPIC" if has_banned else "⚠️ NEUTRAL")
         print(f"🔍 [{source}] '{text[:60]}...' → {status}", flush=True)
         
-        # Accetta se: (1) ha keywords finanza E non banned, OPPURE (2) non ha banned (neutrale OK)
+        # Accetta se: (1) ha keywords psicologia E non banned, OPPURE (2) non ha banned (neutrale OK)
         return not has_banned
 
     def download_file(url: str) -> str:
@@ -211,13 +230,13 @@ def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: floa
         tmp_clip.close()
         return tmp_clip.name
 
-    # --- PEXELS: query finanza ---
+    # --- PEXELS: query psicologia ---
     def try_pexels():
         if not PEXELS_API_KEY:
             return None
         headers = {"Authorization": PEXELS_API_KEY}
         params = {
-            "query": f"{query} business finance charts investment planning",
+            "query": f"{query} person emotion mental health psychology therapy",
             "orientation": "landscape",
             "per_page": 25,
             "page": random.randint(1, 3),
@@ -232,23 +251,23 @@ def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: floa
             return None
 
         videos = resp.json().get("videos", [])
-        finance_videos = [v for v in videos if is_finance_video_metadata(v, "pexels")]
+        psychology_videos = [v for v in videos if is_psychology_video_metadata(v, "pexels")]
 
-        print(f"🎯 Pexels: {len(videos)} totali → {len(finance_videos)} FINANCE OK", flush=True)
-        if finance_videos:
-            video = random.choice(finance_videos)
+        print(f"🎯 Pexels: {len(videos)} totali → {len(psychology_videos)} PSYCHOLOGY OK", flush=True)
+        if psychology_videos:
+            video = random.choice(psychology_videos)
             for vf in video.get("video_files", []):
                 if vf.get("width", 0) >= 1280:
                     return download_file(vf["link"])
         return None
 
-    # --- PIXABAY: query finanza ---
+    # --- PIXABAY: query psicologia ---
     def try_pixabay():
         if not PIXABAY_API_KEY:
             return None
         params = {
             "key": PIXABAY_API_KEY,
-            "q": f"{query} business finance charts investment planning",
+            "q": f"{query} person emotion mental health psychology therapy",
             "per_page": 25,
             "safesearch": "true",
             "min_width": 1280,
@@ -259,7 +278,7 @@ def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: floa
 
         hits = resp.json().get("hits", [])
         for hit in hits:
-            if is_finance_video_metadata(hit, "pixabay"):
+            if is_psychology_video_metadata(hit, "pixabay"):
                 videos = hit.get("videos", {})
                 for quality in ["large", "medium", "small"]:
                     if quality in videos and "url" in videos[quality]:
@@ -340,7 +359,7 @@ def generate():
 
         print("=" * 80, flush=True)
         print(
-            f"🎬 START FINANZA: {len(script)} char script, keywords: '{sheet_keywords}'",
+            f"🎬 START PSICOLOGIA: {len(script)} char script, keywords: '{sheet_keywords}'",
             flush=True,
         )
 
@@ -419,7 +438,7 @@ def generate():
             scene_context = (
                 " ".join(script_words[word_index: word_index + 7])
                 if word_index < len(script_words)
-                else "financial charts investment planning business growth"
+                else "person thinking mental health psychology therapy calm"
             )
             scene_query = pick_visual_query(scene_context, sheet_keywords)
             scene_assignments.append(
@@ -636,7 +655,7 @@ def generate():
                 pass
 
         print(
-            f"✅ VIDEO FINANZA COMPLETO: {real_duration/60:.1f}min → {public_url}",
+            f"✅ VIDEO PSICOLOGIA COMPLETO: {real_duration/60:.1f}min → {public_url}",
             flush=True,
         )
 
