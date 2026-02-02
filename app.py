@@ -19,13 +19,15 @@ from google.oauth2.service_account import Credentials
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment Variables
+# 🔧 FIX 1: Railway Variables
 MAX_DURATION = int(os.getenv('MAX_DURATION', '3600'))
-MAX_CLIPS = int(os.getenv('MAX_CLIPS', '5'))  # Solo 5 clip per shorts!
+MAX_CONCURRENT = int(os.getenv('MAX_CONCURRENT', '5'))
+MAX_CLIPS = int(os.getenv('MAX_CLIPS', '40'))
+LOG_RATE = int(os.getenv('LOG_RATE', '100'))
 
 app = Flask(__name__)
 
-# R2 Config
+# Config R2 (S3 compatibile)
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
@@ -36,18 +38,38 @@ R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID")
 # Pexels / Pixabay API
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY")
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY")
+GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON", "")
+
+# ✅ ID FISSO PSICOLOGIA PRATICA E RELAZIONI
+SPREADSHEET_ID = "1YX4cF92zEU2B1KnbhOknsY7KYdB2rBIO6j_8z0PlkWs"
+
+# 🔔 Webhook flusso 2 (Psicologia)
+N8N_WEBHOOK_URL_FLUSSO2 = os.environ.get("N8N_WEBHOOK_URL_PSICOLOGIA_PRATICA_RELAZIONI_FLUSSO2")
 
 jobs = {}
 MAX_JOBS = 50
 
+def get_gspread_client():
+    """Client Google Sheets per update Video_URL"""
+    try:
+        if not GOOGLE_CREDENTIALS_JSON:
+            return None
+        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        return gspread.authorize(credentials)
+    except Exception as e:
+        logger.error(f"Google Sheets client error: {e}")
+        return None
+
 def get_s3_client():
-    """Client S3 per Cloudflare R2"""
+    """Client S3 configurato per Cloudflare R2"""
     if R2_ACCOUNT_ID:
         endpoint_url = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
     else:
         endpoint_url = None
     if endpoint_url is None:
-        raise RuntimeError("R2_ACCOUNT_ID mancante")
+        raise RuntimeError("Endpoint R2 non configurato: imposta R2_ACCOUNT_ID in Railway")
     
     session = boto3.session.Session()
     s3_client = session.client(
@@ -60,50 +82,164 @@ def get_s3_client():
     )
     return s3_client
 
+def cleanup_old_videos(s3_client, current_key):
+    """Cancella tutti i video MP4 in R2 TRANNE quello appena caricato"""
+    try:
+        paginator = s3_client.get_paginator("list_objects_v2")
+        pages = paginator.paginate(Bucket=R2_BUCKET_NAME, Prefix="videos/")
+        deleted_count = 0
+        for page in pages:
+            if "Contents" not in page:
+                continue
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                if key.endswith(".mp4") and key != current_key:
+                    s3_client.delete_object(Bucket=R2_BUCKET_NAME, Key=key)
+                    deleted_count += 1
+                    print(f"🗑️ Cancellato vecchio video: {key}", flush=True)
+        if deleted_count > 0:
+            print(f"✅ Rotazione completata: {deleted_count} video vecchi rimossi", flush=True)
+        else:
+            print("✅ Nessun video vecchio da rimuovere", flush=True)
+    except Exception as e:
+        print(f"⚠️ Errore rotazione R2 (video vecchi restano): {str(e)}", flush=True)
+
+def notify_n8n_flusso2(job):
+    """Invia webhook a n8n quando il job è completato."""
+    if not N8N_WEBHOOK_URL_FLUSSO2:
+        print("⚠️ N8N_WEBHOOK_URL_PSICOLOGIA_PRATICA_RELAZIONI_FLUSSO2 non configurata, skip webhook", flush=True)
+        return
+
+    try:
+        payload = {
+            "job_id": job.get("job_id"),
+            "video_url": job.get("video_url"),
+            "duration": job.get("duration"),
+            "clips_used": job.get("clips_used"),
+            # dati che arrivano dal flusso 1 nel /generate
+            "title": job.get("data", {}).get("title"),
+            "description_pro": job.get("data", {}).get("description_pro"),
+            "row_id": job.get("row_number") or job.get("data", {}).get("row_id"),
+            "keywords": job.get("data", {}).get("keywords"),
+            "playlist": job.get("data", {}).get("playlist"),
+            "channel": "psicologia_pratica_relazioni",
+        }
+        resp = requests.post(N8N_WEBHOOK_URL_FLUSSO2, json=payload, timeout=15)
+        print(f"🔔 Webhook n8n flusso2 status={resp.status_code}", flush=True)
+    except Exception as e:
+        print(f"⚠️ Errore invio webhook n8n flusso2: {e}", flush=True)
+
+# -------------------------------------------------
+# Mapping SCENA → QUERY visiva (PSICOLOGIA PRATICA E RELAZIONI)
+# -------------------------------------------------
+def pick_visual_query(context: str, keywords_text: str = "") -> str:
+    """Query B-roll PSICOLOGIA: persone, emozioni, relazioni, meditazione, terapia."""
+    ctx = (context or "").lower()
+    kw = (keywords_text or "").lower()
+    
+    base = "person thinking reflection, mental health wellness, psychology therapy, human emotions calm"
+    
+    # Ansia / Stress / Preoccupazione
+    if any(w in ctx for w in ["ansia", "stress", "preoccupaz", "tension", "nervos", "paura", "panic"]):
+        return "anxious person stress worry, mental health anxiety calm, stressed woman thinking alone head in hands"
+    
+    # Relazioni / Coppia / Amore / Partner
+    if any(w in ctx for w in ["relazion", "coppia", "amore", "partner", "marito", "moglie", "fidanzat"]):
+        return "couple talking serious conversation, relationship therapy communication, partners discussing emotions together"
+    
+    # Narcisismo / Tossico / Manipolazione / Abuso emotivo
+    if any(w in ctx for w in ["narcis", "tossic", "manipolaz", "abuso", "gaslighting", "controllo"]):
+        return "toxic relationship conflict argument, emotional abuse manipulation, person feeling trapped unhappy relationship"
+    
+    # Autostima / Fiducia / Sicurezza / Crescita personale
+    if any(w in ctx for w in ["autostima", "fiducia", "sicurezz", "crescita personal", "valore", "autoefficacia"]):
+        return "confident person self-esteem mirror, personal growth self-love journey, woman smiling empowerment strength"
+    
+    # Depressione / Tristezza / Solitudine / Malinconia
+    if any(w in ctx for w in ["depress", "tristezz", "solitudin", "malinconi", "abbatt", "disperaz"]):
+        return "sad person depression loneliness, melancholy woman looking window rain, mental health sadness isolation"
+    
+    # Terapia / Psicologo / Supporto / Aiuto professionale
+    if any(w in ctx for w in ["terapi", "psicolog", "supporto", "aiuto", "profession", "seduta", "consulenz"]):
+        return "therapy session psychologist patient, counseling support mental health, therapist listening empathy professional"
+    
+    # Mindfulness / Meditazione / Calma / Consapevolezza
+    if any(w in ctx for w in ["mindful", "meditaz", "calma", "consapevol", "respiro", "rilassa", "zen"]):
+        return "meditation mindfulness peaceful calm, woman meditating nature serenity, breathing exercise relaxation yoga"
+    
+    # Emozioni / Sentimenti / Empatia / Intelligenza emotiva
+    if any(w in ctx for w in ["emozion", "sentiment", "empatia", "intelligent emot", "provare", "sentir"]):
+        return "emotional expression feelings face, empathy human connection understanding, person experiencing emotions tears joy"
+    
+    # Keywords da Sheet
+    if kw and kw != "none":
+        return f"{kw}, psychology mental health, human emotions, therapy wellness, personal growth"
+    
+    # Fallback
+    return base
+
+def is_psychology_video_metadata(video_data, source):
+    """Filtro PERMISSIVO Psicologia: accetta tutto tranne banned."""
+    psychology_keywords = ["person", "people", "woman", "man", "face", "emotion", "thinking",
+                          "therapy", "mental", "health", "psychology", "meditation", "calm",
+                          "relationship", "couple", "talking", "communication", "feeling"]
+    
+    banned = ["dog", "cat", "animal", "food", "cooking", "fitness", "gym", "sports",
+              "wedding", "party", "gaming", "technology", "gadget"]
+    
+    if source == "pexels":
+        text = (video_data.get("description", "") + " " + " ".join(video_data.get("tags", []))).lower()
+    else:
+        text = " ".join(video_data.get("tags", [])).lower()
+    
+    psychology_count = sum(1 for kw in psychology_keywords if kw in text)
+    has_banned = any(kw in text for kw in banned)
+    
+    if has_banned:
+        status = "❌ BANNED"
+    elif psychology_count >= 1:
+        status = f"✅ PSYCHOLOGY({psychology_count})"
+    else:
+        status = f"⚠️ NEUTRAL(psy:{psychology_count})"
+    
+    print(f"🔍 [{source}] '{text[:60]}...' → {status}", flush=True)
+    return not has_banned
+
 def download_file(url: str) -> str:
-    """Download file da URL"""
-    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    resp = requests.get(url, stream=True, timeout=30)
-    resp.raise_for_status()
-    for chunk in resp.iter_content(chunk_size=1024 * 1024):
+    """Download video con chunk grandi per velocità"""
+    tmp_clip = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    clip_resp = requests.get(url, stream=True, timeout=30)
+    clip_resp.raise_for_status()
+    for chunk in clip_resp.iter_content(chunk_size=1024 * 1024):
         if chunk:
-            tmp_file.write(chunk)
-    tmp_file.close()
-    return tmp_file.name
+            tmp_clip.write(chunk)
+    tmp_clip.close()
+    return tmp_clip.name
 
-def pick_visual_query(keywords: str) -> str:
-    """Query Pexels generica basata su keywords"""
-    if not keywords or keywords.lower() == "none":
-        return "person thinking emotion calm peaceful nature"
-    
-    # Pulisci keywords
-    kw_clean = keywords.lower().replace(",", " ").strip()
-    
-    # Query generica + keywords
-    return f"{kw_clean} person emotion lifestyle calm peaceful"
-
-def fetch_clip_for_scene(scene_number: int, query: str, duration: float = 15.0):
-    """Scarica clip da Pexels/Pixabay"""
+def fetch_clip_for_scene(scene_number: int, query: str, avg_scene_duration: float):
+    """🎯 PSICOLOGIA: B-roll emotivo. Fallback Pixabay se Pexels 0."""
+    target_duration = min(4.0, avg_scene_duration)
     
     def try_pexels():
         if not PEXELS_API_KEY:
             return None
         headers = {"Authorization": PEXELS_API_KEY}
         params = {
-            "query": query,
-            "orientation": "portrait",  # 9:16 per shorts!
-            "per_page": 20,
+            "query": f"{query} person emotion mental health psychology therapy",
+            "orientation": "landscape",
+            "per_page": 25,
             "page": random.randint(1, 3),
         }
         resp = requests.get("https://api.pexels.com/videos/search", headers=headers, params=params, timeout=20)
         if resp.status_code != 200:
             return None
         videos = resp.json().get("videos", [])
-        if videos:
-            video = random.choice(videos)
+        psychology_videos = [v for v in videos if is_psychology_video_metadata(v, "pexels")]
+        print(f"🎯 Pexels: {len(videos)} totali → {len(psychology_videos)} PSYCHOLOGY OK (no banned)", flush=True)
+        if psychology_videos:
+            video = random.choice(psychology_videos)
             for vf in video.get("video_files", []):
-                # Cerca vertical video (portrait)
-                if vf.get("width", 0) >= 720 and vf.get("height", 0) >= 1280:
+                if vf.get("width", 0) >= 1280:
                     return download_file(vf["link"])
         return None
     
@@ -112,20 +248,21 @@ def fetch_clip_for_scene(scene_number: int, query: str, duration: float = 15.0):
             return None
         params = {
             "key": PIXABAY_API_KEY,
-            "q": query,
-            "per_page": 20,
+            "q": f"{query} person emotion mental health psychology therapy",
+            "per_page": 25,
             "safesearch": "true",
-            "min_width": 720,
+            "min_width": 1280,
         }
         resp = requests.get("https://pixabay.com/api/videos/", params=params, timeout=20)
         if resp.status_code != 200:
             return None
         hits = resp.json().get("hits", [])
         for hit in hits:
-            videos = hit.get("videos", {})
-            for quality in ["large", "medium", "small"]:
-                if quality in videos and "url" in videos[quality]:
-                    return download_file(videos[quality]["url"])
+            if is_psychology_video_metadata(hit, "pixabay"):
+                videos = hit.get("videos", {})
+                for quality in ["large", "medium", "small"]:
+                    if quality in videos and "url" in videos[quality]:
+                        return download_file(videos[quality]["url"])
         return None
     
     # Priorità: Pexels → Pixabay
@@ -133,8 +270,8 @@ def fetch_clip_for_scene(scene_number: int, query: str, duration: float = 15.0):
         try:
             path = func()
             if path:
-                print(f"🎥 Clip {scene_number}: '{query[:40]}...' → {source_name} ✓", flush=True)
-                return path, duration
+                print(f"🎥 Scena {scene_number}: '{query[:40]}...' → {source_name} ✓", flush=True)
+                return path, target_duration
         except Exception as e:
             print(f"⚠️ {source_name}: {e}", flush=True)
     
@@ -144,6 +281,12 @@ def fetch_clip_for_scene(scene_number: int, query: str, duration: float = 15.0):
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "healthy", "jobs": len(jobs)})
+
+@app.route("/ffmpeg-test", methods=["GET"])
+def ffmpeg_test():
+    result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    firstline = result.stdout.splitlines()[0] if result.stdout else "no output"
+    return jsonify({"ffmpeg_output": firstline})
 
 @app.route("/status/<job_id>", methods=["GET"])
 def get_status(job_id):
@@ -157,206 +300,228 @@ def get_status(job_id):
         "created_at": job.get("created_at")
     }
     if job['status'] == 'completed':
-        response['results'] = job.get('results', [])
+        response['video_url'] = job.get('video_url')
+        response['duration'] = job.get('duration')
+        response['clips_used'] = job.get('clips_used')
     elif job['status'] == 'failed':
         response['error'] = job.get('error')
     
     return jsonify(response)
 
-def process_social_shorts_async(job_id, data):
-    """Genera 4 shorts (stesse clip, audio diverso per ogni social)"""
+def process_video_async(job_id, data):
+    """Processa video PSICOLOGIA in background thread"""
     job = jobs[job_id]
     job["status"] = "processing"
+    # memorizza info per il webhook n8n flusso 2
+    job["job_id"] = job_id
+    job["data"] = data
     
-    video_clips_path = None
+    audiopath = None
+    audio_wav_path = None
+    video_looped_path = None
+    final_video_path = None
     scene_paths = []
-    normalized_clips = []
     
     try:
         if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_BASE_URL]):
             raise RuntimeError("Config R2 mancante")
         
-        channel_name = data.get("channel_name", "default")
-        keywords = data.get("keywords", "")
-        platforms = data.get("platforms", [])  # Array 4 oggetti {platform, audio_base64, description, hashtags}
+        audiobase64 = data.get("audio_base64") or data.get("audiobase64")
+        raw_script = (data.get("script") or data.get("script_chunk") or data.get("script_audio") or data.get("script_completo") or "")
+        script = (" ".join(str(p).strip() for p in raw_script) if isinstance(raw_script, list) else str(raw_script).strip())
+        raw_keywords = data.get("keywords", "")
+        sheet_keywords = (", ".join(str(k).strip() for k in raw_keywords) if isinstance(raw_keywords, list) else str(raw_keywords).strip())
         
-        if len(platforms) != 4:
-            raise RuntimeError(f"Servono 4 platforms, ricevuti: {len(platforms)}")
-        
+        # 🔧 Parsing row_number ULTRA-ROBUSTO
+        row_number_raw = data.get("row_number")
+        if isinstance(row_number_raw, dict):
+            row_number = int(row_number_raw.get('row', row_number_raw.get('row_number', 1)))
+        elif isinstance(row_number_raw, str):
+            row_number = int(row_number_raw) if row_number_raw.isdigit() else 1
+        elif isinstance(row_number_raw, (int, float)):
+            row_number = int(row_number_raw)
+        else:
+            row_number = 1
+
         print("=" * 80, flush=True)
-        print(f"🎬 START AGENTE SOCIAL: {channel_name}, keywords: '{keywords}', {len(platforms)} platforms", flush=True)
+        print(f"🎬 START PSICOLOGIA PRATICA: {len(script)} char script, keywords: '{sheet_keywords}', row: {row_number}", flush=True)
+        print(f"🔍 DEBUG row_number RAW: '{row_number_raw}' → PARSED: '{row_number}'", flush=True)
+        print(f"🔍 DEBUG GOOGLE_CREDENTIALS_JSON: {'PRESENTE ({len(GOOGLE_CREDENTIALS_JSON)} char)' if GOOGLE_CREDENTIALS_JSON else 'MANCANTE'}", flush=True)
         
-        # 1. SCARICA 5 CLIP DA PEXELS/PIXABAY
-        print(f"📥 Scarico {MAX_CLIPS} clip da Pexels/Pixabay...", flush=True)
-        query = pick_visual_query(keywords)
+        if not audiobase64:
+            raise RuntimeError("audiobase64 mancante")
         
-        for i in range(MAX_CLIPS):
-            clip_path, clip_dur = fetch_clip_for_scene(i + 1, query, 15.0)
+        # Audio processing
+        audio_bytes = base64.b64decode(audiobase64)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+            f.write(audio_bytes)
+        audiopath_tmp = f.name
+        
+        audio_wav_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        audio_wav_path = audio_wav_tmp.name
+        audio_wav_tmp.close()
+        
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error", "-i", audiopath_tmp,
+            "-acodec", "pcm_s16le", "-ar", "48000", audio_wav_path
+        ], timeout=MAX_DURATION, check=True)
+        os.unlink(audiopath_tmp)
+        audiopath = audio_wav_path
+        
+        probe = subprocess.run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", audiopath
+        ], stdout=subprocess.PIPE, text=True, timeout=10)
+        real_duration = float(probe.stdout.strip() or 720.0)
+        print(f"⏱️ Durata audio: {real_duration/60:.1f}min ({real_duration:.0f}s)", flush=True)
+        
+        script_words = script.lower().split()
+        words_per_second = (len(script_words) / real_duration if real_duration > 0 else 2.5)
+        num_scenes = MAX_CLIPS
+        avg_scene_duration = real_duration / num_scenes
+        scene_assignments = []
+        
+        for i in range(num_scenes):
+            if i % 10 == 0:
+                print(f"🔧 Clip {i}/{num_scenes}", flush=True)
+            timestamp = i * avg_scene_duration
+            word_index = int(timestamp * words_per_second)
+            scene_context = " ".join(script_words[word_index: word_index + 7]) if word_index < len(script_words) else "person thinking mental health psychology"
+            scene_query = pick_visual_query(scene_context, sheet_keywords)
+            scene_assignments.append({
+                "scene": i + 1, "timestamp": round(timestamp, 1),
+                "context": scene_context[:60], "query": scene_query[:80]
+            })
+        
+        for assignment in scene_assignments:
+            clip_path, clip_dur = fetch_clip_for_scene(
+                assignment["scene"], assignment["query"], avg_scene_duration
+            )
             if clip_path and clip_dur:
                 scene_paths.append((clip_path, clip_dur))
         
-        print(f"✅ {len(scene_paths)}/{MAX_CLIPS} clip scaricate", flush=True)
+        print(f"✅ CLIPS SCARICATE: {len(scene_paths)}/{num_scenes}", flush=True)
+        if len(scene_paths) < 5:
+            raise RuntimeError(f"Troppe poche clip: {len(scene_paths)}/{num_scenes}")
         
-        if len(scene_paths) < 3:
-            raise RuntimeError(f"Troppe poche clip: {len(scene_paths)}/{MAX_CLIPS}")
-        
-        # 2. NORMALIZZA CLIP 9:16 (1080x1920)
-        print("🔧 Normalizzo clip in 9:16...", flush=True)
+        normalized_clips = []
         for i, (clip_path, _dur) in enumerate(scene_paths):
             try:
                 normalized_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
                 normalized_path = normalized_tmp.name
                 normalized_tmp.close()
-                
                 subprocess.run([
                     "ffmpeg", "-y", "-loglevel", "error", "-i", clip_path,
-                    "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=30",
                     "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-an", normalized_path
                 ], timeout=MAX_DURATION, check=True)
-                
                 if os.path.exists(normalized_path) and os.path.getsize(normalized_path) > 1000:
                     normalized_clips.append(normalized_path)
-                    print(f"✅ Clip {i+1} normalizzata", flush=True)
-            except Exception as e:
-                print(f"⚠️ Errore normalize clip {i+1}: {e}", flush=True)
+            except Exception:
+                pass
         
         if not normalized_clips:
             raise RuntimeError("Nessuna clip normalizzata")
         
-        # 3. CONCATENA CLIP (video base senza audio)
-        print("🔗 Concateno clip...", flush=True)
+        def get_duration(p):
+            out = subprocess.run([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", p
+            ], stdout=subprocess.PIPE, text=True, timeout=10).stdout.strip()
+            return float(out or 4.0)
+        
+        total_clips_duration = sum(get_duration(p) for p in normalized_clips)
         concat_list_tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
-        for norm_path in normalized_clips:
-            concat_list_tmp.write(f"file '{norm_path}'\n")
+        entries_written = 0
+        MAX_CONCAT_ENTRIES = 150
+        
+        if total_clips_duration < real_duration and len(normalized_clips) > 1:
+            loops_needed = math.ceil(real_duration / total_clips_duration)
+            for _ in range(loops_needed):
+                for norm_path in normalized_clips:
+                    if entries_written >= MAX_CONCAT_ENTRIES:
+                        break
+                    concat_list_tmp.write(f"file '{norm_path}'\n")
+                    entries_written += 1
+                if entries_written >= MAX_CONCAT_ENTRIES:
+                    break
+        else:
+            for norm_path in normalized_clips:
+                concat_list_tmp.write(f"file '{norm_path}'\n")
+                entries_written += 1
+        
         concat_list_tmp.close()
         
-        video_clips_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-        video_clips_path = video_clips_tmp.name
-        video_clips_tmp.close()
+        video_looped_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        video_looped_path = video_looped_tmp.name
+        video_looped_tmp.close()
         
         subprocess.run([
             "ffmpeg", "-y", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", concat_list_tmp.name,
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-an",
-            video_clips_path
+            "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-t", str(real_duration), video_looped_path
+        ], timeout=MAX_DURATION, check=True)
+        os.unlink(concat_list_tmp.name)
+        
+        final_video_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        final_video_path = final_video_tmp.name
+        final_video_tmp.close()
+        
+        subprocess.run([
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", video_looped_path, "-i", audiopath,
+            "-filter_complex", "[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,format=yuv420p[v]",
+            "-map", "[v]", "-map", "1:a", "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "192k", "-shortest", final_video_path
         ], timeout=MAX_DURATION, check=True)
         
-        os.unlink(concat_list_tmp.name)
-        print(f"✅ Video base concatenato: {video_clips_path}", flush=True)
-        
-        # 4. GENERA 4 SHORTS (loop per ogni social)
-        print("🎬 Genero 4 shorts (audio diverso)...", flush=True)
-        results = []
         s3_client = get_s3_client()
         today = dt.datetime.utcnow().strftime("%Y-%m-%d")
+        object_key = f"videos/{today}/{uuid.uuid4().hex}.mp4"
+        s3_client.upload_file(
+            Filename=final_video_path,
+            Bucket=R2_BUCKET_NAME,
+            Key=object_key,
+            ExtraArgs={"ContentType": "video/mp4"}
+        )
+        public_url = f"{R2_PUBLIC_BASE_URL.rstrip('/')}/{object_key}"
+        cleanup_old_videos(s3_client, object_key)
         
-        for idx, platform_data in enumerate(platforms):
-            platform = platform_data.get("platform", f"Platform_{idx}")
-            audio_base64 = platform_data.get("audio_base64")
-            description = platform_data.get("description", "")
-            hashtags = platform_data.get("hashtags", "")
-            
-            if not audio_base64:
-                print(f"⚠️ Platform {platform}: audio_base64 mancante, skip", flush=True)
-                continue
-            
-            print(f"🔧 [{idx+1}/4] Processing {platform}...", flush=True)
-            
-            # Decode audio
+        # 🔧 Sheets update BULLETPROOF
+        gc = get_gspread_client()
+        print(f"🔍 DEBUG gspread client: {'OK' if gc else 'FAILED'}", flush=True)
+        if gc and row_number > 0:
             try:
-                audio_bytes = base64.b64decode(audio_base64)
+                sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
+                sheet.update_cell(row_number, 13, public_url)
+                sheet.update_cell(row_number, 2, "PRODOTTO")
+                print(f"📊 ✅ Sheet row {row_number}: M={public_url[:60]} + B=PRODOTTO (anti-loop)", flush=True)
             except Exception as e:
-                print(f"❌ Decode audio failed per {platform}: {e}", flush=True)
-                continue
-            
-            audio_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".bin")
-            audio_tmp.write(audio_bytes)
-            audio_tmp.close()
-            
-            # Convert audio a WAV
-            audio_wav_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            audio_wav_path = audio_wav_tmp.name
-            audio_wav_tmp.close()
-            
-            subprocess.run([
-                "ffmpeg", "-y", "-loglevel", "error", "-i", audio_tmp.name,
-                "-acodec", "pcm_s16le", "-ar", "48000", audio_wav_path
-            ], timeout=120, check=True)
-            
-            os.unlink(audio_tmp.name)
-            
-            # Get audio duration
-            probe = subprocess.run([
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", audio_wav_path
-            ], stdout=subprocess.PIPE, text=True, timeout=10)
-            audio_duration = float(probe.stdout.strip() or 60.0)
-            
-            # Merge video + audio
-            final_video_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-            final_video_path = final_video_tmp.name
-            final_video_tmp.close()
-            
-            subprocess.run([
-                "ffmpeg", "-y", "-loglevel", "error",
-                "-stream_loop", "-1", "-i", video_clips_path,  # Loop video
-                "-i", audio_wav_path,
-                "-t", str(audio_duration),  # Taglia a durata audio
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-c:a", "aac", "-b:a", "192k", "-shortest",
-                final_video_path
-            ], timeout=MAX_DURATION, check=True)
-            
-            os.unlink(audio_wav_path)
-            
-            # Upload R2
-            platform_short = platform.replace(" ", "_")
-            object_key = f"shorts/{channel_name}/{today}/{platform_short}_{uuid.uuid4().hex}.mp4"
-            
-            s3_client.upload_file(
-                Filename=final_video_path,
-                Bucket=R2_BUCKET_NAME,
-                Key=object_key,
-                ExtraArgs={"ContentType": "video/mp4"}
-            )
-            
-            public_url = f"{R2_PUBLIC_BASE_URL.rstrip('/')}/{object_key}"
-            
-            results.append({
-                "platform": platform,
-                "video_url": public_url,
-                "description": description,
-                "hashtags": hashtags,
-                "duration": round(audio_duration, 1)
-            })
-            
-            os.unlink(final_video_path)
-            print(f"✅ {platform}: {public_url}", flush=True)
+                print(f"❌ Sheets fallito row {row_number}: {str(e)}", flush=True)
         
-        # Cleanup
-        if video_clips_path and os.path.exists(video_clips_path):
-            os.unlink(video_clips_path)
-        for clip_path, _ in scene_paths:
+        paths_to_cleanup = [audiopath, video_looped_path, final_video_path] + normalized_clips + [p[0] for p in scene_paths]
+        for path in paths_to_cleanup:
             try:
-                os.unlink(clip_path)
-            except:
-                pass
-        for norm_path in normalized_clips:
-            try:
-                os.unlink(norm_path)
-            except:
+                os.unlink(path)
+            except Exception:
                 pass
         
-        print(f"🎉 {len(results)} SHORTS GENERATI!", flush=True)
-        print("=" * 80, flush=True)
+        print(f"✅ 🧠 VIDEO PSICOLOGIA COMPLETO: {real_duration/60:.1f}min → {public_url}", flush=True)
         
         job.update({
             "status": "completed",
-            "results": results
+            "video_url": public_url,
+            "duration": real_duration,
+            "clips_used": len(scene_paths),
+            "row_number": row_number
         })
+
+        # Notifica n8n flusso 2
+        notify_n8n_flusso2(job)
         
     except Exception as e:
-        print(f"❌ ERRORE AGENTE SOCIAL: {e}", flush=True)
+        print(f"❌ ERRORE PSICOLOGIA: {e}", flush=True)
         job.update({"status": "failed", "error": str(e)})
     
     finally:
@@ -385,14 +550,14 @@ def generate():
             for oj in old_jobs:
                 del jobs[oj]
         
-        Thread(target=process_social_shorts_async, args=(job_id, data), daemon=True).start()
+        Thread(target=process_video_async, args=(job_id, data), daemon=True).start()
         
-        print(f"🚀 Job {job_id} QUEUED: channel={data.get('channel_name')}, platforms={len(data.get('platforms', []))}", flush=True)
+        print(f"🚀 PSICOLOGIA Job {job_id} QUEUED: raw_row={data.get('row_number')}", flush=True)
         return jsonify({
             "success": True,
             "job_id": job_id,
             "status": "queued",
-            "message": "4 shorts generation started (check /status/<job_id>)"
+            "message": "Video generation started (check /status/<job_id>)"
         })
     
     except Exception as e:
